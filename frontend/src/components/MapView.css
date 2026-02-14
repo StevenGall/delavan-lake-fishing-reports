@@ -1,0 +1,275 @@
+.map-container {
+  padding: 1.5rem;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.map-header {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+.map-header h1 {
+  font-size: 2rem;
+  color: #1a365d;
+  margin-bottom: 0.5rem;
+}
+
+.map-header p {
+  color: #4a5568;
+}
+
+.map-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.month-selector {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.month-selector label {
+  font-weight: 600;
+  color: #4a5568;
+}
+
+.month-selector select {
+  padding: 0.5rem 1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 1rem;
+  color: #2d3748;
+  background: #f7fafc;
+}
+
+.map-legend {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #4a5568;
+  font-size: 0.875rem;
+}
+
+.legend-marker {
+  font-size: 1.25rem;
+}
+
+.map-wrapper {
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  margin-bottom: 2rem;
+}
+
+.map-loading,
+.map-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+  background: #f7fafc;
+  border-radius: 12px;
+  padding: 2rem;
+  text-align: center;
+}
+
+.map-error {
+  background: #fff5f5;
+  color: #c53030;
+}
+
+.map-error h3 {
+  margin-bottom: 1rem;
+  color: #742a2a;
+}
+
+.map-error code {
+  display: block;
+  padding: 0.75rem 1rem;
+  background: #2d3748;
+  color: #68d391;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  margin: 1rem 0;
+}
+
+.map-error a {
+  color: #3182ce;
+}
+
+.loading-overlay {
+  text-align: center;
+  padding: 1rem;
+  color: #4a5568;
+}
+
+.error {
+  text-align: center;
+  padding: 1rem;
+  color: #c53030;
+  background: #fed7d7;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+.info-window {
+  padding: 0.5rem;
+  max-width: 250px;
+}
+
+.info-window h4 {
+  color: #667eea;
+  margin-bottom: 0.5rem;
+  font-size: 1.1rem;
+}
+
+.info-window p {
+  margin: 0.25rem 0;
+  font-size: 0.875rem;
+  color: #4a5568;
+}
+
+.info-window .success-count {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #e2e8f0;
+  color: #38a169;
+  font-weight: 600;
+}
+
+.location-stats {
+  margin-top: 2rem;
+}
+
+.location-stats h3 {
+  font-size: 1.25rem;
+  color: #2d3748;
+  margin-bottom: 1rem;
+}
+
+.location-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.location-card {
+  background: white;
+  border-radius: 8px;
+  padding: 1rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  border: 1px solid #e2e8f0;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.location-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.location-name {
+  font-weight: 600;
+  color: #2d3748;
+  margin-bottom: 0.5rem;
+}
+
+.location-count {
+  color: #667eea;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.location-depth {
+  color: #718096;
+  font-size: 0.8rem;
+  margin-top: 0.25rem;
+}
+
+.location-species {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  color: #4a5568;
+  font-style: italic;
+}
+
+/* Recommendations fallback (when no API key) */
+.recommendations-fallback {
+  margin-top: 2rem;
+}
+
+.recommendations-list h3 {
+  font-size: 1.25rem;
+  color: #2d3748;
+  margin-bottom: 1rem;
+}
+
+.rec-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.rec-card {
+  background: white;
+  border-radius: 10px;
+  padding: 1.25rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  border: 1px solid #e2e8f0;
+}
+
+.rec-species {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #667eea;
+  margin-bottom: 0.75rem;
+}
+
+.rec-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.875rem;
+  color: #4a5568;
+}
+
+.rec-count {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #e2e8f0;
+  font-size: 0.8rem;
+  color: #38a169;
+  font-weight: 500;
+}
+
+.loading {
+  text-align: center;
+  padding: 2rem;
+  color: #4a5568;
+}
+
+@media (max-width: 768px) {
+  .map-controls {
+    flex-direction: column;
+    gap: 1rem;
+    align-items: flex-start;
+  }
+
+  .location-cards {
+    grid-template-columns: 1fr;
+  }
+}
