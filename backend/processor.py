@@ -2,6 +2,7 @@
 import os
 import json
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Optional
 
@@ -24,7 +25,7 @@ EXTRACTION_PROMPT = """You are an expert at extracting structured fishing inform
 
 Analyze the following fishing report and extract the relevant information. Return ONLY valid JSON with the following structure:
 
-{
+{{
     "date_posted": "ISO format date if available, or null",
     "month": 1-12 integer for the month, or null if unknown,
     "season": "winter", "spring", "summer", or "fall" based on the date/context,
@@ -38,7 +39,7 @@ Analyze the following fishing report and extract the relevant information. Retur
     "weather_conditions": "sunny, cloudy, partly cloudy, rainy, snowy, etc.",
     "ice_thickness_inches": number in inches if ice fishing, or null,
     "notes": "any other relevant fishing tips or observations"
-}
+}}
 
 Common fish species in Delavan Lake include: Largemouth Bass, Smallmouth Bass, Walleye, Northern Pike, Musky (Muskellunge), Bluegill, Crappie, Perch, Catfish, Carp, Panfish.
 
@@ -111,20 +112,32 @@ def get_season_from_month(month: int) -> str:
         return "fall"
 
 
-def process_reports(batch_size: int = 100, max_reports: Optional[int] = None):
+def _process_single_report(report: dict) -> tuple[int, Optional[dict], Optional[str]]:
+    """Process a single report. Returns (report_id, extracted_data, error_message)."""
+    try:
+        extracted = extract_fishing_data(report)
+        if not extracted:
+            return (report["id"], None, "Failed to extract data")
+        return (report["id"], extracted, None)
+    except Exception as e:
+        return (report["id"], None, str(e))
+
+
+def process_reports(batch_size: int = 100, max_reports: Optional[int] = None, workers: int = 10):
     """
     Process unprocessed raw reports using the LLM.
 
     Args:
         batch_size: Number of reports to process in each batch
         max_reports: Maximum total reports to process (None for all)
+        workers: Number of concurrent API calls
     """
     init_database()
 
     total_processed = 0
     total_errors = 0
 
-    print("Starting LLM processing of fishing reports...")
+    print(f"Starting LLM processing of fishing reports ({workers} concurrent workers)...")
 
     while True:
         # Check if we've reached the max
@@ -140,16 +153,21 @@ def process_reports(batch_size: int = 100, max_reports: Optional[int] = None):
             print("No more unprocessed reports.")
             break
 
+        # Build a lookup for quick access by report ID
+        reports_by_id = {r["id"]: r for r in reports}
+
         print(f"Processing batch of {len(reports)} reports...")
 
-        for i, report in enumerate(reports):
-            try:
-                # Extract data using LLM
-                extracted = extract_fishing_data(report)
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(_process_single_report, r): r["id"] for r in reports}
 
-                if not extracted:
-                    print(f"  [{i+1}/{len(reports)}] Failed to extract data for report {report['id']}")
+            for future in as_completed(futures):
+                report_id, extracted, error = future.result()
+                report = reports_by_id[report_id]
+
+                if error:
                     total_errors += 1
+                    print(f"  Error report {report_id}: {error}")
                     continue
 
                 # Ensure we have a valid month
@@ -187,14 +205,12 @@ def process_reports(batch_size: int = 100, max_reports: Optional[int] = None):
                 if result:
                     total_processed += 1
                     species = extracted.get("species_caught", "unknown")
-                    print(f"  [{i+1}/{len(reports)}] Processed report {report['id']}: {species[:30]}...")
+                    if total_processed % 100 == 0:
+                        print(f"  Progress: {total_processed} processed, {total_errors} errors")
                 else:
-                    print(f"  [{i+1}/{len(reports)}] Report {report['id']} already processed")
+                    print(f"  Report {report_id} already processed")
 
-            except Exception as e:
-                print(f"  [{i+1}/{len(reports)}] Error processing report {report['id']}: {e}")
-                total_errors += 1
-                continue
+        print(f"  Batch done: {total_processed} total processed, {total_errors} total errors")
 
     print(f"\nProcessing complete!")
     print(f"Total reports processed: {total_processed}")
@@ -220,6 +236,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process fishing reports with LLM")
     parser.add_argument("--batch", type=int, default=100, help="Batch size for processing")
     parser.add_argument("--max", type=int, default=None, help="Max reports to process (default: all)")
+    parser.add_argument("--workers", type=int, default=10, help="Number of concurrent API calls (default: 10)")
     parser.add_argument("--sample", action="store_true", help="Process only 10 reports as a sample")
 
     args = parser.parse_args()
@@ -233,4 +250,4 @@ if __name__ == "__main__":
     if args.sample:
         process_sample()
     else:
-        process_reports(batch_size=args.batch, max_reports=args.max)
+        process_reports(batch_size=args.batch, max_reports=args.max, workers=args.workers)
