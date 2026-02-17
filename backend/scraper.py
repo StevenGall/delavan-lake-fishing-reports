@@ -84,10 +84,10 @@ def create_session(authenticate: bool = True) -> requests.Session:
         resp.raise_for_status()
 
         data = resp.json()
-        if data.get("SUCCESS"):
+        if data.get("status") == "ok":
             print(f"Authenticated as {email}")
         else:
-            message = data.get("MESSAGE", "Unknown error")
+            message = data.get("message", "Unknown error")
             print(f"Authentication failed: {message}")
             print("Falling back to unauthenticated scraping")
 

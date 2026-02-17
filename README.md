@@ -13,11 +13,13 @@ A web application that scrapes, processes, and displays historical fishing repor
 
 ```
 ├── backend/
+│   ├── pw               # pyprojectx wrapper (bootstraps uv automatically)
+│   ├── pyproject.toml   # Project config, dependencies, and pw aliases
 │   ├── database.py      # SQLite database operations
 │   ├── scraper.py       # Web scraper for Lake-Link
 │   ├── processor.py     # LLM data extraction
 │   ├── api.py           # FastAPI REST API
-│   └── requirements.txt
+│   └── .env.example     # Environment variable template
 ├── frontend/
 │   ├── src/
 │   │   ├── components/  # React components
@@ -31,33 +33,25 @@ A web application that scrapes, processes, and displays historical fishing repor
 
 ### Prerequisites
 
-- Python 3.10+
+- Python 3.14+
 - Node.js 18+
 - OpenAI API key
+- Lake-Link account (see [Lake-Link Account Tiers](#lake-link-account-tiers))
+
+No other tooling needs to be installed. The `pw` wrapper script automatically bootstraps [uv](https://github.com/astral-sh/uv) via [pyprojectx](https://github.com/pyprojectx/pyprojectx) on first run.
 
 ### Backend Setup
 
-1. Create a virtual environment:
+1. Install dependencies (automatically creates a venv and installs everything):
    ```bash
    cd backend
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ./pw install
    ```
 
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. Create `.env` file with your OpenAI API key:
+2. Create `.env` file with your credentials:
    ```bash
    cp .env.example .env
-   # Edit .env and add your OPENAI_API_KEY
-   ```
-
-4. Initialize the database:
-   ```bash
-   python database.py
+   # Edit .env and add your keys
    ```
 
 ### Frontend Setup
@@ -74,7 +68,20 @@ A web application that scrapes, processes, and displays historical fishing repor
    # Edit .env and add your VITE_GOOGLE_MAPS_API_KEY
    ```
 
+## Lake-Link Account Tiers
+
+The scraper authenticates with Lake-Link.com to access fishing reports. The amount of data available depends on your account tier:
+
+| Tier | Cost | Access |
+|------|------|--------|
+| **Free account** | Free | ~225 most recent reports only |
+| **Lake-Link Pro** | $2.99 | Full historical archive (18,000+ reports dating back to 2003) |
+
+A free account is sufficient for testing, but a Pro subscription is needed to scrape the full dataset. Sign up at [lake-link.com/login](https://www.lake-link.com/login/) and upgrade at [lake-link.com/upgrade](https://www.lake-link.com/upgrade/) if needed.
+
 ## Usage
+
+All commands are run from the `backend/` directory using the `./pw` wrapper.
 
 ### 1. Scrape Fishing Reports
 
@@ -82,13 +89,13 @@ A web application that scrapes, processes, and displays historical fishing repor
 cd backend
 
 # Scrape a sample (5 pages)
-python scraper.py --sample
+./pw scrape-sample
 
-# Scrape all reports (this may take a while - ~18,000+ reports)
-python scraper.py
+# Scrape all reports (requires Lake-Link Pro for full archive)
+./pw scrape
 
-# Scrape with custom options
-python scraper.py --pages 100 --delay 1.5
+# Scrape without authentication (recent reports only)
+./pw scrape-noauth
 ```
 
 ### 2. Process Reports with LLM
@@ -97,22 +104,20 @@ python scraper.py --pages 100 --delay 1.5
 cd backend
 
 # Process a sample (10 reports)
-python processor.py --sample
+./pw process -- --sample
 
 # Process all unprocessed reports
-python processor.py
+./pw process
 
 # Process with custom batch size
-python processor.py --batch 50 --max 500
+./pw process -- --batch 50 --max 500
 ```
 
 ### 3. Start the API Server
 
 ```bash
 cd backend
-python api.py
-# Or with uvicorn for development:
-uvicorn api:app --reload
+./pw serve
 ```
 
 The API will be available at http://localhost:8000
