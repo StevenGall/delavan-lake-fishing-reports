@@ -1,4 +1,5 @@
 """Web scraper for Lake-Link fishing reports."""
+import os
 import re
 import time
 import hashlib
@@ -8,10 +9,14 @@ from typing import Optional
 
 import requests
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 
 from database import init_database, insert_raw_report, get_stats
 
+load_dotenv()
+
 BASE_URL = "https://www.lake-link.com/wisconsin-fishing-reports/delavan-lake-walworth-county/4470/"
+LOGIN_URL = "https://www.lake-link.com/assets/cfcs/authenticate.cfc?method=authenticateUser"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
@@ -54,7 +59,42 @@ def parse_date(date_str: str) -> Optional[str]:
     return date_str
 
 
-def scrape_page(start_row: int = 1, records_per_page: int = 10) -> tuple[list, int]:
+def create_session(authenticate: bool = True) -> requests.Session:
+    """Create a requests session, optionally with Lake-Link authentication."""
+    session = requests.Session()
+    session.headers.update(HEADERS)
+
+    if authenticate:
+        email = os.environ.get("LAKELINK_EMAIL")
+        password = os.environ.get("LAKELINK_PASSWORD")
+        if not email or not password:
+            print("Warning: LAKELINK_EMAIL/LAKELINK_PASSWORD not set in .env")
+            print("Running without authentication (limited to ~225 recent reports)")
+            return session
+
+        # Hit the login page first to establish cookies
+        session.get("https://www.lake-link.com/login/", timeout=30)
+
+        payload = {
+            "loginAccount": "Lake-Link",
+            "email": email,
+            "password": password,
+        }
+        resp = session.post(LOGIN_URL, json=payload, timeout=30)
+        resp.raise_for_status()
+
+        data = resp.json()
+        if data.get("SUCCESS"):
+            print(f"Authenticated as {email}")
+        else:
+            message = data.get("MESSAGE", "Unknown error")
+            print(f"Authentication failed: {message}")
+            print("Falling back to unauthenticated scraping")
+
+    return session
+
+
+def scrape_page(session: requests.Session, start_row: int = 1, records_per_page: int = 10) -> tuple[list, int]:
     """
     Scrape a single page of fishing reports.
     Returns (list of reports, total count).
@@ -65,7 +105,7 @@ def scrape_page(start_row: int = 1, records_per_page: int = 10) -> tuple[list, i
         "recordsToDisplay": records_per_page
     }
 
-    response = requests.get(BASE_URL, params=params, headers=HEADERS, timeout=30)
+    response = session.get(BASE_URL, params=params, timeout=30)
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "lxml")
@@ -159,26 +199,29 @@ def parse_report(container) -> Optional[dict]:
     return report
 
 
-def scrape_all_reports(max_pages: Optional[int] = None, delay: float = 1.0):
+def scrape_all_reports(max_pages: Optional[int] = None, delay: float = 1.0, authenticate: bool = True):
     """
     Scrape all fishing reports from the website.
 
     Args:
         max_pages: Maximum number of pages to scrape (None for all)
         delay: Delay between requests in seconds
+        authenticate: Whether to log in for full access to historical reports
     """
     init_database()
+    session = create_session(authenticate=authenticate)
 
     records_per_page = 50  # Request more per page for efficiency
     start_row = 1
     page = 1
     total_scraped = 0
     total_inserted = 0
+    consecutive_empty = 0
 
-    print(f"Starting scrape of Delavan Lake fishing reports...")
+    print("Starting scrape of Delavan Lake fishing reports...")
 
     # First request to get total count
-    reports, total_count = scrape_page(start_row, records_per_page)
+    reports, total_count = scrape_page(session, start_row, records_per_page)
 
     if total_count == 0:
         print("Could not determine total report count. Will scrape until no more reports found.")
@@ -197,11 +240,19 @@ def scrape_all_reports(max_pages: Optional[int] = None, delay: float = 1.0):
 
         if page > 1:  # We already got page 1
             time.sleep(delay)
-            reports, _ = scrape_page(start_row, records_per_page)
+            reports, _ = scrape_page(session, start_row, records_per_page)
 
         if not reports:
-            print("No more reports found.")
-            break
+            consecutive_empty += 1
+            if consecutive_empty >= 3:
+                print("3 consecutive empty pages, stopping.")
+                break
+            print(f"  No reports on this page (empty streak: {consecutive_empty})")
+            start_row += records_per_page
+            page += 1
+            continue
+
+        consecutive_empty = 0
 
         for report in reports:
             total_scraped += 1
@@ -217,7 +268,7 @@ def scrape_all_reports(max_pages: Optional[int] = None, delay: float = 1.0):
             if result:
                 total_inserted += 1
 
-        print(f"  Scraped {len(reports)} reports, {total_inserted} new insertions")
+        print(f"  Scraped {len(reports)} reports, {total_inserted} new insertions so far")
 
         start_row += records_per_page
         page += 1
@@ -245,10 +296,11 @@ if __name__ == "__main__":
     parser.add_argument("--pages", type=int, default=None, help="Max pages to scrape (default: all)")
     parser.add_argument("--delay", type=float, default=1.0, help="Delay between requests in seconds")
     parser.add_argument("--sample", action="store_true", help="Scrape only 5 pages as a sample")
+    parser.add_argument("--no-auth", action="store_true", help="Skip authentication (limited to recent reports)")
 
     args = parser.parse_args()
 
     if args.sample:
         scrape_sample()
     else:
-        scrape_all_reports(max_pages=args.pages, delay=args.delay)
+        scrape_all_reports(max_pages=args.pages, delay=args.delay, authenticate=not args.no_auth)
