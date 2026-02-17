@@ -72,41 +72,17 @@ def scrape_page(start_row: int = 1, records_per_page: int = 10) -> tuple[list, i
     reports = []
     total_count = 0
 
-    # Try to get total count from pagination info
-    pagination_text = soup.find(string=re.compile(r"Displaying \d+ to \d+ of [\d,]+ posts"))
+    # Total count from "Displaying X to Y of Z posts"
+    pagination_text = soup.find(string=re.compile(r"Displaying\s+\d+\s+to\s+\d+\s+of\s+[\d,]+\s+posts"))
     if pagination_text:
-        match = re.search(r"of ([\d,]+) posts", pagination_text)
+        match = re.search(r"of\s+([\d,]+)\s+posts", pagination_text)
         if match:
             total_count = int(match.group(1).replace(",", ""))
 
-    # Find all report containers
-    # Looking for the main content area with reports
-    content_area = soup.find("div", class_="content-area") or soup.find("main") or soup
+    # Each report is a <div id="post-id-NNNNNNN">
+    report_divs = soup.find_all("div", id=re.compile(r"^post-id-"))
 
-    # Reports are typically in div elements with specific patterns
-    # We'll look for elements containing timestamps and user info
-    report_divs = []
-
-    # Method 1: Look for timestamp patterns directly
-    for div in content_area.find_all("div"):
-        text = div.get_text()
-        if re.search(r"\d{1,2}/\d{1,2}/\d{2}\s*@\s*\d{1,2}:\d{2}", text):
-            # Check if this looks like a report container (has user link, content)
-            if div.find("a", href=re.compile(r"/profile/")):
-                report_divs.append(div)
-
-    # Remove nested duplicates (keep outermost containers)
-    filtered_divs = []
     for div in report_divs:
-        is_nested = False
-        for other in report_divs:
-            if div != other and div in other.descendants:
-                is_nested = True
-                break
-        if not is_nested:
-            filtered_divs.append(div)
-
-    for div in filtered_divs:
         try:
             report = parse_report(div)
             if report:
@@ -122,60 +98,56 @@ def parse_report(container) -> Optional[dict]:
     """Parse a single report container into structured data."""
     report = {}
 
-    # Extract timestamp
-    text = container.get_text()
-    date_match = re.search(r"(\d{1,2}/\d{1,2}/\d{2}\s*@\s*\d{1,2}:\d{2}\s*(?:AM|PM)?)", text, re.IGNORECASE)
-    if date_match:
-        report["date_posted"] = parse_date(date_match.group(1))
+    # Extract timestamp from <strong class="text-primary"><small>DATE</small></strong>
+    date_el = container.find("strong", class_="text-primary")
+    if date_el:
+        date_text = date_el.get_text(strip=True)
+        report["date_posted"] = parse_date(date_text)
     else:
-        return None  # Skip if no date found
+        return None
 
-    # Extract username from profile link
-    profile_link = container.find("a", href=re.compile(r"/profile/"))
-    if profile_link:
-        report["username"] = profile_link.get_text(strip=True)
+    # Extract username from <h6>
+    h6 = container.find("h6")
+    if h6:
+        # Username is the direct text, ignoring child elements like the online/offline icon
+        report["username"] = h6.find(string=True, recursive=False).strip()
     else:
         report["username"] = "Unknown"
 
-    # Extract weather badge (e.g., "Partly Sunny 20°")
-    weather_match = re.search(r"((?:Sunny|Cloudy|Partly\s+(?:Sunny|Cloudy)|Overcast|Rain|Snow|Clear|Fog)\s*\d*°?)", text, re.IGNORECASE)
-    if weather_match:
-        report["weather_badge"] = weather_match.group(1).strip()
+    # Extract weather/conditions from the badge row
+    badge_row = container.find("div", class_=re.compile(r"d-flex.*align-items-center.*flex-wrap"))
+    if badge_row:
+        badges = badge_row.find_all("strong")
+        badge_texts = [b.get_text(strip=True) for b in badges]
 
-    # Extract location tag
-    location_patterns = [
-        r"Location:\s*([^\n]+)",
-        r"(Weed Beds|Drop Off|Points?|Bay|Shore|Deep Water|Shallow|North|South|East|West|Blue Gill Rd|Ice Shanty)",
-    ]
-    for pattern in location_patterns:
-        loc_match = re.search(pattern, text, re.IGNORECASE)
-        if loc_match:
-            report["location_tag"] = loc_match.group(1).strip()
-            break
+        # Weather badge is typically like "Sunny 40°" or "Partly Cloudy 25°"
+        for text in badge_texts:
+            if re.search(r"(Sunny|Cloudy|Overcast|Rain|Snow|Clear|Fog|Windy)", text, re.IGNORECASE):
+                report["weather_badge"] = text
+                break
 
-    # Extract main content
-    # Try to get the report text, excluding metadata
-    content_text = text
+        # Ice conditions
+        ice_text = badge_row.get_text()
+        ice_match = re.search(r'Ice:\s*(\d+["\u201d]?)', ice_text)
+        if ice_match:
+            report["ice_conditions"] = f"Ice: {ice_match.group(1)}"
 
-    # Remove date/time stamps
-    content_text = re.sub(r"\d{1,2}/\d{1,2}/\d{2}\s*@\s*\d{1,2}:\d{2}\s*(?:AM|PM)?", "", content_text, flags=re.IGNORECASE)
-    # Remove "Report Abuse" and similar
-    content_text = re.sub(r"Report Abuse", "", content_text, flags=re.IGNORECASE)
-    # Remove like counts
-    content_text = re.sub(r"\d+\s*likes?", "", content_text, flags=re.IGNORECASE)
+    # Extract main content from <div class="card-text post-content ...">
+    content_div = container.find("div", class_=re.compile(r"post-content"))
+    if content_div:
+        report["raw_content"] = content_div.get_text(strip=True)
+    else:
+        return None
 
-    # Clean up whitespace
-    content_text = re.sub(r"\s+", " ", content_text).strip()
+    if len(report.get("raw_content", "")) < 10:
+        return None
 
-    if len(content_text) < 10:
-        return None  # Skip very short/empty reports
-
-    report["raw_content"] = content_text
-
-    # Extract image URLs
-    images = container.find_all("img", src=re.compile(r"cloudinary|upload"))
-    if images:
-        report["image_urls"] = ",".join([img.get("src", "") for img in images if img.get("src")])
+    # Extract image URLs from card-body (skip avatar images)
+    card_body = container.find("div", class_="card-body")
+    if card_body:
+        images = card_body.find_all("img", src=re.compile(r"cloudinary|upload"))
+        if images:
+            report["image_urls"] = ",".join([img.get("src", "") for img in images if img.get("src")])
 
     # Generate unique ID
     report["source_id"] = generate_source_id(
