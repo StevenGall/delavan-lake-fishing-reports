@@ -15,6 +15,8 @@ from database import (
     get_stats,
     get_connection
 )
+from location_mapper import get_all_zones, map_location_to_zone, get_zone, FISHING_ZONES
+from recommender import get_today_recommendations
 
 app = FastAPI(
     title="Delavan Lake Fishing Reports API",
@@ -335,6 +337,313 @@ async def get_recommendations(
         "month": month,
         "month_name": month_names[month - 1],
         "recommendations": recommendations
+    }
+
+
+@app.get("/recommendations/today")
+async def get_recommendations_today(
+    month: Optional[int] = Query(None, ge=1, le=12),
+):
+    """Get smart fishing recommendations for today (or a given month).
+
+    Uses multi-dimensional scoring: volume, recency, data specificity,
+    consistency across years, and conditions data.
+    """
+    if not month:
+        month = datetime.now().month
+
+    conn = get_connection()
+    recommendations = get_today_recommendations(conn, month)
+    conn.close()
+
+    month_names = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    ]
+
+    return {
+        "month": month,
+        "month_name": month_names[month - 1],
+        "recommendations": [
+            {
+                "species": r.species,
+                "confidence": r.confidence,
+                "report_count_this_month": r.report_count,
+                "best_zone": {
+                    "zone_id": r.best_zone_id,
+                    "name": r.best_zone_name,
+                } if r.best_zone_id else None,
+                "best_bait": r.best_bait,
+                "target_depth": r.target_depth,
+                "historical_water_temp": {
+                    "min": r.water_temp_min,
+                    "avg": r.water_temp_avg,
+                    "max": r.water_temp_max,
+                } if r.water_temp_avg else None,
+                "is_ice_fishing_month": r.is_ice_fishing,
+                "years_with_catches": r.years_with_catches,
+                "total_years_data": r.total_years_data,
+            }
+            for r in recommendations[:10]
+        ],
+    }
+
+
+@app.get("/zones")
+async def get_zones():
+    """Get all fishing zones with report counts."""
+    zones = get_all_zones()
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Count reports per zone by mapping locations
+    cursor.execute("""
+        SELECT location, COUNT(*) as count
+        FROM processed_reports
+        WHERE location IS NOT NULL AND location != ''
+        GROUP BY location
+    """)
+
+    zone_counts: dict[str, int] = {}
+    for row in cursor.fetchall():
+        zone_id = map_location_to_zone(row["location"])
+        if zone_id:
+            zone_counts[zone_id] = zone_counts.get(zone_id, 0) + row["count"]
+
+    conn.close()
+
+    for zone in zones:
+        zone["report_count"] = zone_counts.get(zone["zone_id"], 0)
+
+    return zones
+
+
+@app.get("/zones/{zone_id}/stats")
+async def get_zone_stats(zone_id: str):
+    """Get detailed statistics for a fishing zone."""
+    zone_info = get_zone(zone_id)
+    if not zone_info:
+        raise HTTPException(status_code=404, detail=f"Zone '{zone_id}' not found")
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Get all reports and filter by zone mapping
+    cursor.execute("""
+        SELECT p.*, r.raw_content, r.username, r.image_urls
+        FROM processed_reports p
+        JOIN raw_reports r ON p.raw_report_id = r.id
+        WHERE p.location IS NOT NULL AND p.location != ''
+        ORDER BY p.date_posted DESC
+    """)
+
+    zone_reports = []
+    for row in cursor.fetchall():
+        report = dict(row)
+        if map_location_to_zone(report["location"]) == zone_id:
+            zone_reports.append(report)
+
+    conn.close()
+
+    # Compute stats from zone reports
+    species_counts: dict[str, int] = {}
+    bait_counts: dict[str, int] = {}
+    monthly_counts: dict[int, int] = {}
+    depths: list[float] = []
+    water_temps: list[float] = []
+
+    for r in zone_reports:
+        if r.get("species_caught"):
+            for sp in r["species_caught"].split(","):
+                sp = sp.strip()
+                if sp:
+                    species_counts[sp] = species_counts.get(sp, 0) + 1
+        if r.get("bait_lure"):
+            for b in r["bait_lure"].split(","):
+                b = b.strip()
+                if b:
+                    bait_counts[b] = bait_counts.get(b, 0) + 1
+        if r.get("month"):
+            monthly_counts[r["month"]] = monthly_counts.get(r["month"], 0) + 1
+        if r.get("water_depth_feet"):
+            depths.append(r["water_depth_feet"])
+        if r.get("water_temp_f"):
+            water_temps.append(r["water_temp_f"])
+
+    return {
+        "zone": {
+            "zone_id": zone_info.zone_id,
+            "name": zone_info.name,
+            "description": zone_info.description,
+            "typical_depth_min": zone_info.typical_depth_min,
+            "typical_depth_max": zone_info.typical_depth_max,
+            "report_count": len(zone_reports),
+        },
+        "species_breakdown": sorted(
+            [{"species": k, "count": v} for k, v in species_counts.items()],
+            key=lambda x: x["count"], reverse=True
+        )[:15],
+        "top_baits": sorted(
+            [{"bait": k, "count": v} for k, v in bait_counts.items()],
+            key=lambda x: x["count"], reverse=True
+        )[:10],
+        "monthly_distribution": [
+            {"month": m, "count": monthly_counts.get(m, 0)} for m in range(1, 13)
+        ],
+        "avg_depth": round(sum(depths) / len(depths), 1) if depths else None,
+        "avg_water_temp": round(sum(water_temps) / len(water_temps), 1) if water_temps else None,
+        "recent_reports": zone_reports[:10],
+    }
+
+
+@app.get("/heatmap")
+async def get_heatmap(
+    species: Optional[str] = Query(None),
+    month: Optional[int] = Query(None, ge=1, le=12),
+    season: Optional[str] = Query(None),
+):
+    """Get zone-level heatmap data for map coloring."""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    query = """
+        SELECT location, COUNT(*) as count
+        FROM processed_reports
+        WHERE location IS NOT NULL AND location != ''
+    """
+    params: list = []
+
+    if species:
+        query += " AND (species_caught LIKE ? OR species_targeted LIKE ?)"
+        params.extend([f"%{species}%", f"%{species}%"])
+    if month:
+        query += " AND month = ?"
+        params.append(month)
+    if season:
+        query += " AND season = ?"
+        params.append(season)
+
+    query += " GROUP BY location"
+    cursor.execute(query, params)
+
+    zone_counts: dict[str, int] = {}
+    for row in cursor.fetchall():
+        zone_id = map_location_to_zone(row["location"])
+        if zone_id:
+            zone_counts[zone_id] = zone_counts.get(zone_id, 0) + row["count"]
+
+    conn.close()
+
+    max_count = max(zone_counts.values()) if zone_counts else 1
+
+    return [
+        {
+            "zone_id": zone.zone_id,
+            "report_count": zone_counts.get(zone.zone_id, 0),
+            "intensity": round(zone_counts.get(zone.zone_id, 0) / max_count, 3) if max_count > 0 else 0,
+        }
+        for zone in FISHING_ZONES
+    ]
+
+
+@app.get("/species/{species_name}/profile")
+async def get_species_profile(species_name: str):
+    """Get comprehensive profile data for a species."""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Get all reports for this species
+    cursor.execute("""
+        SELECT p.*, r.raw_content, r.username
+        FROM processed_reports p
+        JOIN raw_reports r ON p.raw_report_id = r.id
+        WHERE p.species_caught LIKE ?
+        ORDER BY p.date_posted DESC
+    """, (f"%{species_name}%",))
+
+    reports = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+
+    if not reports:
+        raise HTTPException(status_code=404, detail=f"No reports found for species '{species_name}'")
+
+    # Monthly distribution
+    monthly: dict[int, int] = {}
+    yearly: dict[int, int] = {}
+    bait_counts: dict[str, int] = {}
+    zone_counts: dict[str, int] = {}
+    depths: list[float] = []
+    depth_by_season: dict[str, list[float]] = {}
+    co_species: dict[str, int] = {}
+
+    for r in reports:
+        if r.get("month"):
+            monthly[r["month"]] = monthly.get(r["month"], 0) + 1
+        if r.get("date_posted"):
+            try:
+                year = int(r["date_posted"][:4])
+                if 2000 <= year <= 2030:
+                    yearly[year] = yearly.get(year, 0) + 1
+            except (ValueError, IndexError):
+                pass
+        if r.get("bait_lure"):
+            for b in r["bait_lure"].split(","):
+                b = b.strip()
+                if b:
+                    bait_counts[b] = bait_counts.get(b, 0) + 1
+        if r.get("location"):
+            zone_id = map_location_to_zone(r["location"])
+            if zone_id:
+                zone_name = get_zone(zone_id)
+                key = zone_id
+                zone_counts[key] = zone_counts.get(key, 0) + 1
+        if r.get("water_depth_feet"):
+            depths.append(r["water_depth_feet"])
+            if r.get("season"):
+                depth_by_season.setdefault(r["season"], []).append(r["water_depth_feet"])
+        if r.get("species_caught"):
+            for sp in r["species_caught"].split(","):
+                sp = sp.strip()
+                if sp and sp.lower() != species_name.lower():
+                    co_species[sp] = co_species.get(sp, 0) + 1
+
+    peak_month = max(monthly, key=monthly.get) if monthly else None
+
+    return {
+        "species": species_name,
+        "total_reports": len(reports),
+        "peak_month": peak_month,
+        "avg_depth": round(sum(depths) / len(depths), 1) if depths else None,
+        "depth_range": {"min": min(depths), "max": max(depths)} if depths else None,
+        "monthly_distribution": [
+            {"month": m, "count": monthly.get(m, 0)} for m in range(1, 13)
+        ],
+        "yearly_trend": sorted(
+            [{"year": k, "count": v} for k, v in yearly.items()],
+            key=lambda x: x["year"]
+        ),
+        "top_baits": sorted(
+            [{"bait": k, "count": v} for k, v in bait_counts.items()],
+            key=lambda x: x["count"], reverse=True
+        )[:10],
+        "top_zones": sorted(
+            [
+                {"zone_id": k, "name": get_zone(k).name if get_zone(k) else k, "count": v}
+                for k, v in zone_counts.items()
+            ],
+            key=lambda x: x["count"], reverse=True
+        )[:10],
+        "depth_by_season": [
+            {
+                "season": s,
+                "avg_depth": round(sum(ds) / len(ds), 1)
+            }
+            for s, ds in depth_by_season.items()
+        ],
+        "associated_species": sorted(
+            [{"species": k, "co_occurrence_count": v} for k, v in co_species.items()],
+            key=lambda x: x["co_occurrence_count"], reverse=True
+        )[:10],
     }
 
 

@@ -1,12 +1,17 @@
 import axios from 'axios';
 import type {
   FishingReport,
+  FishingZone,
+  HeatmapData,
   Stats,
   SpeciesCount,
+  SpeciesProfile,
   LocationStat,
   MonthlyStat,
   RecommendationsResponse,
   SearchFilters,
+  TodayRecommendationsResponse,
+  ZoneStats,
 } from './types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -77,5 +82,49 @@ export async function getRecommendations(
   if (species) params.species = species;
 
   const response = await api.get<RecommendationsResponse>('/recommendations', { params });
+  return response.data;
+}
+
+// Smart recommendations
+export async function getTodayRecommendations(
+  month?: number
+): Promise<TodayRecommendationsResponse> {
+  const params: Record<string, number> = {};
+  if (month) params.month = month;
+
+  const response = await api.get<TodayRecommendationsResponse>('/recommendations/today', {
+    params,
+  });
+  return response.data;
+}
+
+// Zone / Map endpoints
+
+export async function getZones(): Promise<FishingZone[]> {
+  const response = await api.get<FishingZone[]>('/zones');
+  return response.data;
+}
+
+export async function getZoneStats(zoneId: string): Promise<ZoneStats> {
+  const response = await api.get<ZoneStats>(`/zones/${zoneId}/stats`);
+  return response.data;
+}
+
+export async function getHeatmapData(params: {
+  species?: string;
+  month?: number;
+  season?: string;
+}): Promise<HeatmapData[]> {
+  const queryParams: Record<string, string | number> = {};
+  if (params.species) queryParams.species = params.species;
+  if (params.month) queryParams.month = params.month;
+  if (params.season) queryParams.season = params.season;
+
+  const response = await api.get<HeatmapData[]>('/heatmap', { params: queryParams });
+  return response.data;
+}
+
+export async function getSpeciesProfile(species: string): Promise<SpeciesProfile> {
+  const response = await api.get<SpeciesProfile>(`/species/${encodeURIComponent(species)}/profile`);
   return response.data;
 }

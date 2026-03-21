@@ -1,18 +1,47 @@
-:root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+@import "tailwindcss";
 
-  color-scheme: light;
-  color: #213547;
-  background-color: #f0f4f8;
+@theme {
+  /* Lake-themed color palette */
+  --color-lake-50: #f0f7ff;
+  --color-lake-100: #e0efff;
+  --color-lake-200: #b8d8f8;
+  --color-lake-300: #7bb8e8;
+  --color-lake-400: #4a9ad8;
+  --color-lake-500: #2b7cb8;
+  --color-lake-600: #1a5f8f;
+  --color-lake-700: #134a6f;
+  --color-lake-800: #0d3650;
+  --color-lake-900: #082538;
 
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  /* Depth gradient colors (shallow to deep) */
+  --color-depth-5: #bfdbfe;
+  --color-depth-10: #93c5fd;
+  --color-depth-15: #60a5fa;
+  --color-depth-20: #3b82f6;
+  --color-depth-25: #2563eb;
+  --color-depth-30: #1d4ed8;
+  --color-depth-35: #1e40af;
+  --color-depth-40: #1e3a8a;
+  --color-depth-45: #172554;
+  --color-depth-50: #0f172a;
+
+  /* Nature accents */
+  --color-forest-400: #4ade80;
+  --color-forest-500: #2d6a4f;
+  --color-forest-600: #1b4332;
+
+  --color-sand-100: #fef3c7;
+  --color-sand-200: #fde68a;
+
+  /* Catch indicators */
+  --color-catch-gold: #f59e0b;
+  --color-catch-red: #dc2626;
+
+  /* Font family */
+  --font-sans: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
+/* Base styles */
 #root {
   min-height: 100vh;
 }
