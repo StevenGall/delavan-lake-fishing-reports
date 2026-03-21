@@ -184,21 +184,36 @@ async def get_statistics():
 
 @app.get("/species")
 async def get_all_species():
-    """Get list of all species with counts."""
+    """Get list of all species with normalized counts.
+
+    Species are stored as comma-separated combos (e.g. 'Bluegill, Crappie').
+    This endpoint splits combos and aggregates individual species counts so each
+    species is reported once with its true total across all reports.
+    """
     conn = get_connection()
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT species_caught, COUNT(*) as count
+        SELECT species_caught
         FROM processed_reports
         WHERE species_caught IS NOT NULL AND species_caught != ''
-        GROUP BY species_caught
-        ORDER BY count DESC
     """)
 
-    results = [{"species": row["species_caught"], "count": row["count"]} for row in cursor.fetchall()]
+    species_counts: dict[str, int] = {}
+    skip = {"unknown", "none", ""}
+    for row in cursor.fetchall():
+        for sp in row["species_caught"].split(","):
+            sp = sp.strip().title()  # Normalize case: "bluegill" -> "Bluegill"
+            if sp.lower() not in skip:
+                species_counts[sp] = species_counts.get(sp, 0) + 1
+
     conn.close()
 
+    results = sorted(
+        [{"species": k, "count": v} for k, v in species_counts.items()],
+        key=lambda x: x["count"],
+        reverse=True,
+    )
     return results
 
 
@@ -603,7 +618,7 @@ async def get_species_profile(species_name: str):
                 depth_by_season.setdefault(r["season"], []).append(r["water_depth_feet"])
         if r.get("species_caught"):
             for sp in r["species_caught"].split(","):
-                sp = sp.strip()
+                sp = sp.strip().title()
                 if sp and sp.lower() != species_name.lower():
                     co_species[sp] = co_species.get(sp, 0) + 1
 
@@ -645,6 +660,86 @@ async def get_species_profile(species_name: str):
             key=lambda x: x["co_occurrence_count"], reverse=True
         )[:10],
     }
+
+
+@app.get("/analytics/trends")
+async def get_analytics_trends():
+    """Get year-over-year trend data for the lake."""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT
+            date_posted, species_caught, water_temp_f, air_temp_f
+        FROM processed_reports
+        WHERE date_posted IS NOT NULL
+    """)
+
+    yearly: dict[int, dict] = {}
+    skip_species = {"unknown", "none", ""}
+
+    for row in cursor.fetchall():
+        try:
+            year = int(row["date_posted"][:4])
+        except (ValueError, IndexError, TypeError):
+            continue
+        if year < 2000 or year > 2030:
+            continue
+
+        if year not in yearly:
+            yearly[year] = {
+                "report_count": 0,
+                "species_set": set(),
+                "water_temps": [],
+                "air_temps": [],
+            }
+
+        y = yearly[year]
+        y["report_count"] += 1
+
+        if row["species_caught"]:
+            for sp in row["species_caught"].split(","):
+                sp = sp.strip()
+                if sp.lower() not in skip_species:
+                    y["species_set"].add(sp)
+
+        if row["water_temp_f"] is not None:
+            try:
+                y["water_temps"].append(float(row["water_temp_f"]))
+            except (ValueError, TypeError):
+                pass
+        if row["air_temp_f"] is not None:
+            try:
+                y["air_temps"].append(float(row["air_temp_f"]))
+            except (ValueError, TypeError):
+                pass
+
+    conn.close()
+
+    # Build a cumulative set to detect new species per year
+    seen_species: set[str] = set()
+    results = []
+    for year in sorted(yearly.keys()):
+        y = yearly[year]
+        new_species = y["species_set"] - seen_species
+        seen_species |= y["species_set"]
+
+        results.append({
+            "year": year,
+            "report_count": y["report_count"],
+            "species_diversity": len(y["species_set"]),
+            "avg_water_temp": (
+                round(sum(y["water_temps"]) / len(y["water_temps"]), 1)
+                if y["water_temps"] else None
+            ),
+            "avg_air_temp": (
+                round(sum(y["air_temps"]) / len(y["air_temps"]), 1)
+                if y["air_temps"] else None
+            ),
+            "new_species": sorted(new_species) if new_species else [],
+        })
+
+    return results
 
 
 if __name__ == "__main__":
