@@ -15,7 +15,6 @@ env/
 *.db
 *.sqlite
 *.sqlite3
-seed_data.json
 
 # Build outputs
 dist/
