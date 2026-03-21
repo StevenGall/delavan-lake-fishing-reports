@@ -1,58 +1,64 @@
-import { useState } from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { AppLayout } from './components/layout/AppLayout';
 import { Dashboard } from './components/Dashboard';
 import { ReportsTable } from './components/ReportsTable';
-import { MapView } from './components/MapView';
-import './App.css';
+import { InteractiveLakeMap } from './components/map/InteractiveLakeMap';
 
-type View = 'dashboard' | 'reports' | 'map';
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
+
+// Placeholder components for routes we'll build in later phases
+function SpeciesPlaceholder() {
+  return (
+    <div className="flex h-96 items-center justify-center rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600">
+      <div className="text-center">
+        <p className="text-4xl">🐟</p>
+        <p className="mt-2 text-lg font-medium text-gray-600 dark:text-gray-400">
+          Species Directory
+        </p>
+        <p className="text-sm text-gray-400 dark:text-gray-500">Coming in Phase 4</p>
+      </div>
+    </div>
+  );
+}
+
+function CalendarPlaceholder() {
+  return (
+    <div className="flex h-96 items-center justify-center rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-600">
+      <div className="text-center">
+        <p className="text-4xl">📅</p>
+        <p className="mt-2 text-lg font-medium text-gray-600 dark:text-gray-400">
+          Seasonal Calendar
+        </p>
+        <p className="text-sm text-gray-400 dark:text-gray-500">Coming in Phase 5</p>
+      </div>
+    </div>
+  );
+}
 
 function App() {
-  const [currentView, setCurrentView] = useState<View>('dashboard');
-
   return (
-    <div className="app">
-      <nav className="navbar">
-        <div className="nav-brand">
-          <span className="brand-icon">🎣</span>
-          <span className="brand-text">Delavan Lake Fishing</span>
-        </div>
-        <div className="nav-links">
-          <button
-            className={`nav-link ${currentView === 'dashboard' ? 'active' : ''}`}
-            onClick={() => setCurrentView('dashboard')}
-          >
-            Dashboard
-          </button>
-          <button
-            className={`nav-link ${currentView === 'reports' ? 'active' : ''}`}
-            onClick={() => setCurrentView('reports')}
-          >
-            Reports
-          </button>
-          <button
-            className={`nav-link ${currentView === 'map' ? 'active' : ''}`}
-            onClick={() => setCurrentView('map')}
-          >
-            Map
-          </button>
-        </div>
-      </nav>
-
-      <main className="main-content">
-        {currentView === 'dashboard' && <Dashboard />}
-        {currentView === 'reports' && <ReportsTable />}
-        {currentView === 'map' && <MapView />}
-      </main>
-
-      <footer className="footer">
-        <p>
-          Data sourced from{' '}
-          <a href="https://www.lake-link.com/wisconsin-fishing-reports/delavan-lake-walworth-county/4470/" target="_blank" rel="noopener noreferrer">
-            Lake-Link.com
-          </a>
-        </p>
-      </footer>
-    </div>
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <Routes>
+          <Route element={<AppLayout />}>
+            <Route index element={<Dashboard />} />
+            <Route path="map" element={<InteractiveLakeMap />} />
+            <Route path="reports" element={<ReportsTable />} />
+            <Route path="species" element={<SpeciesPlaceholder />} />
+            <Route path="species/:name" element={<SpeciesPlaceholder />} />
+            <Route path="calendar" element={<CalendarPlaceholder />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </QueryClientProvider>
   );
 }
 
