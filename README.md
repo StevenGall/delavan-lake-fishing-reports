@@ -19,6 +19,7 @@ A web application that scrapes, processes, and displays historical fishing repor
 │   ├── scraper.py       # Web scraper for Lake-Link
 │   ├── processor.py     # LLM data extraction
 │   ├── api.py           # FastAPI REST API
+│   ├── seeder.py        # Database seeder (export/import without API calls)
 │   └── .env.example     # Environment variable template
 ├── frontend/
 │   ├── src/
@@ -113,7 +114,33 @@ cd backend
 ./pw process -- --batch 50 --max 500
 ```
 
-### 3. Start the API Server
+### 3. Seed Database (Skip LLM Processing)
+
+If you have a pre-processed `seed_data.json` file, you can populate your database without calling the OpenAI API:
+
+```bash
+cd backend
+source .venv/bin/activate
+
+# View current database stats
+python seeder.py stats
+
+# Export existing data to seed_data.json (creates a portable backup)
+python seeder.py export
+
+# Seed a fresh database from seed_data.json
+python seeder.py seed
+
+# Seed with --clear to wipe existing data first
+python seeder.py seed --clear
+```
+
+This is useful for:
+- Setting up development environments quickly
+- Sharing processed data without incurring API costs
+- Creating backups of LLM-extracted data
+
+### 4. Start the API Server
 
 ```bash
 cd backend
@@ -122,7 +149,7 @@ cd backend
 
 The API will be available at http://localhost:8000
 
-### 4. Start the Frontend
+### 5. Start the Frontend
 
 ```bash
 cd frontend
